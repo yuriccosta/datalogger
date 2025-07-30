@@ -25,27 +25,33 @@
 #include "font.h"
 
 
-bool mount = false;
-bool read = false;
-#define botaoB 6
-#define botaoA 5
 
-#define LED_PIN_GREEN 11
-#define LED_PIN_BLUE 12
-#define LED_PIN_RED 13
-#define BUZZER_A 21
+// Variáveis globais de estado
+bool mount = false; // Indica se o cartão SD está montado
+bool read = false;  // Indica se está em modo de gravação
+
+// Definições dos pinos dos botões
+#define botaoB 6 // Botão B: inicia/para gravação
+#define botaoA 5 // Botão A: monta/desmonta SD
+
+// Definições dos pinos dos LEDs e buzzer
+#define LED_PIN_GREEN 11 // LED verde: pronto
+#define LED_PIN_BLUE 12  // LED azul: acesso SD
+#define LED_PIN_RED 13   // LED vermelho: erro/estado
+#define BUZZER_A 21      // Buzzer
 
  
-// MPU6050 I2C address
-#define I2C_PORT i2c0               // i2c0 pinos 0 e 1, i2c1 pinos 2 e 3
-#define I2C_SDA 0                   // 0 ou 2
-#define I2C_SCL 1                  // 1 ou 3
-#define I2C_PORT_DISP i2c1
-#define I2C_SDA_DISP 14
-#define I2C_SCL_DISP 15
-#define ENDERECO_DISP 0x3C
-#define DISP_W 128
-#define DISP_H 64
+
+// Definições de I2C para sensores e display
+#define I2C_PORT i2c0               // I2C0: pinos 0 e 1 (MPU6050)
+#define I2C_SDA 0                   // SDA do MPU6050
+#define I2C_SCL 1                   // SCL do MPU6050
+#define I2C_PORT_DISP i2c1          // I2C1: pinos 14 e 15 (Display OLED)
+#define I2C_SDA_DISP 14             // SDA do display
+#define I2C_SCL_DISP 15             // SCL do display
+#define ENDERECO_DISP 0x3C          // Endereço I2C do display SSD1306
+#define DISP_W 128                  // Largura do display
+#define DISP_H 64                   // Altura do display
 
  
  // O endereço padrao deste IMU é o 0x68
@@ -126,6 +132,7 @@ void gpio_irq_handler(uint gpio, uint32_t events)
     if (gpio == botaoB)
     {
         static absolute_time_t ultimo_acionamentoB = 0;
+        // Debounce: só aceita novo comando após 300ms
         if (absolute_time_diff_us(ultimo_acionamentoB, agora) > 300000) {
             if (read){
                 printf("Parando leitura\n");
@@ -138,6 +145,7 @@ void gpio_irq_handler(uint gpio, uint32_t events)
         }
     } else if (!read){
         static absolute_time_t ultimo_acionamentoA = 0;
+        // Debounce: só aceita novo comando após 300ms
         if (absolute_time_diff_us(ultimo_acionamentoA, agora) > 300000) {
             if (mount){
                 printf("Desmontando cartão\n");
@@ -153,6 +161,7 @@ void gpio_irq_handler(uint gpio, uint32_t events)
 
 int main()
 {
+    // Inicialização dos botões e interrupções
     gpio_init(botaoB);
     gpio_set_dir(botaoB, GPIO_IN);
     gpio_pull_up(botaoB);
@@ -162,25 +171,20 @@ int main()
     gpio_set_dir(botaoA, GPIO_IN);
     gpio_pull_up(botaoA);
     gpio_set_irq_enabled_with_callback(botaoA, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
-   
 
-    // Configuração dos LEDs
+    // Inicialização dos LEDs
     gpio_init(LED_PIN_GREEN);
     gpio_set_dir(LED_PIN_GREEN, GPIO_OUT);
     gpio_init(LED_PIN_BLUE);
     gpio_set_dir(LED_PIN_BLUE, GPIO_OUT);
     gpio_init(LED_PIN_RED);
     gpio_set_dir(LED_PIN_RED, GPIO_OUT);
-    
 
-
-
-
+    // Inicialização da UART/USB
     stdio_init_all();
     sleep_ms(5000);
 
-
-
+    // Inicialização do display OLED
     i2c_init(I2C_PORT_DISP, 400 * 1000);
     gpio_set_function(I2C_SDA_DISP, GPIO_FUNC_I2C);
     gpio_set_function(I2C_SCL_DISP, GPIO_FUNC_I2C);
@@ -192,15 +196,15 @@ int main()
     ssd1306_config(&ssd);
     ssd1306_send_data(&ssd);
 
+    // Mensagem inicial no display
     ssd1306_fill(&ssd, false);
-    // Borda do display
     ssd1306_rect(&ssd, 3, 3, 122, 58, true, false);
     ssd1306_draw_string(&ssd, "Inicializando", 10, 6);
     ssd1306_send_data(&ssd);
-    // LED amarelo (verde+vermelho)
-                gpio_put(LED_PIN_GREEN, true);
-                gpio_put(LED_PIN_BLUE, false);
-                gpio_put(LED_PIN_RED, true);
+    // LED amarelo (verde+vermelho) indica inicialização
+    gpio_put(LED_PIN_GREEN, true);
+    gpio_put(LED_PIN_BLUE, false);
+    gpio_put(LED_PIN_RED, true);
 
 
 
@@ -228,17 +232,16 @@ int main()
     sleep_ms(5000);
     time_init();
 
-    FIL file;
-    FRESULT res;
-    UINT bw;
 
-    bool last_mount = false;
-    static uint numero_amostra = 1;
-    static bool azul = false;
+
+    // Variáveis de controle de estado
+    bool last_mount = false;      // Estado anterior da montagem
+    static uint numero_amostra = 1; // Contador de amostras
+    static bool azul = false;        // Estado do LED azul
+
+    // Loop principal
     while (1) {
-       
-
-        // Feedback visual/sonoro para montagem/desmontagem
+        // Feedback visual/sonoro para montagem/desmontagem do SD
         if (mount != last_mount) {
             if (mount) {
                 printf("Montando cartão\n");
@@ -265,14 +268,15 @@ int main()
             last_mount = mount;
         }
 
-        
-        // Gravação de dados
+        // Gravação de dados do IMU
         static bool was_read = false;
         if (mount && read) {
+            // Lê dados do sensor
             mpu6050_read_raw(acceleration, gyro, &temp);
             char amostra_str[10];
             snprintf(amostra_str, sizeof(amostra_str), "%d", numero_amostra);
 
+            // Atualiza display: status de gravação
             ssd1306_fill(&ssd, false);
             ssd1306_rect(&ssd, 3, 3, 122, 58, true, false);
             ssd1306_draw_string(&ssd, "Gravando...", 10, 6);
@@ -280,16 +284,17 @@ int main()
             ssd1306_draw_string(&ssd, amostra_str, 75, 20);
             ssd1306_send_data(&ssd);
 
-            // LED azul piscando (acesso SD)
+            // LED azul piscando indica acesso ao SD
             azul = !azul;
             gpio_put(LED_PIN_GREEN, false);
             gpio_put(LED_PIN_RED, false);
             gpio_put(LED_PIN_BLUE, azul);
 
+            // Salva dados no arquivo CSV
             bool ok = save_imu_data_to_csv(numero_amostra++, acceleration[0], acceleration[1], acceleration[2],
                                 gyro[0], gyro[1], gyro[2]);
             if (!ok) {
-                // LED roxo piscando para erro (vermelho+azul)
+                // LED roxo piscando indica erro de gravação
                 for (int i = 0; i < 3; i++) {
                     gpio_put(LED_PIN_RED, true);
                     gpio_put(LED_PIN_BLUE, true);
@@ -298,6 +303,7 @@ int main()
                     gpio_put(LED_PIN_BLUE, false);
                     sleep_ms(150);
                 }
+                // Mensagem de erro no display
                 ssd1306_fill(&ssd, false);
                 ssd1306_rect(&ssd, 3, 3, 122, 58, true, false);
                 ssd1306_draw_string(&ssd, "ERRO!", 10, 20);
@@ -315,7 +321,7 @@ int main()
                 sleep_ms(300);
                 was_read = false;
             }
-            // Pronto para gravar
+            // Pronto para gravar: LED verde e display aguardando
             gpio_put(LED_PIN_GREEN, true);
             gpio_put(LED_PIN_BLUE, false);
             gpio_put(LED_PIN_RED, false);
@@ -325,7 +331,7 @@ int main()
             ssd1306_draw_string(&ssd, "Aguardando", 10, 6);
             ssd1306_send_data(&ssd);
         } else {
-            // Sistema parado/desmontado
+            // Sistema parado/desmontado: LEDs e display desligados
             gpio_put(LED_PIN_GREEN, false);
             gpio_put(LED_PIN_BLUE, false);
             gpio_put(LED_PIN_RED, false);
@@ -336,7 +342,7 @@ int main()
             was_read = false;
         }
 
-        sleep_ms(500);
+        sleep_ms(500); // Intervalo entre leituras (500ms)
     }
     return 0;
- }
+}
